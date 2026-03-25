@@ -1,160 +1,177 @@
 // @action.title: Mode Matrix
 // @action.description: Create a visual matrix showing selection in every mode of a collection
 // @action.category: organization
-// @action.version: 1.0.0
+// @action.version: 2.0.0
 
-/**
- * Mode Matrix
- *
- * Creates a visual matrix of the current selection rendered in every mode
- * of a variable collection. Useful for reviewing how components look
- * across themes, breakpoints, or brand variants.
- *
- * How it works:
- * 1. Clones the selection once per mode
- * 2. Labels each clone with the mode name
- * 3. Groups everything and zooms to fit
- */
+/* @action.params
+[
+  { "key": "axes", "type": "select", "label": "Axes", "options": ["1 Axis", "2 Axes"], "default": "1 Axis" },
+  { "key": "collectionX", "type": "select", "label": "Collection (X Axis)", "source": "figma:collections" },
+  { "key": "collectionY", "type": "select", "label": "Collection (Y Axis)", "source": "figma:collections", "showWhen": { "axes": "2 Axes" } }
+]
+*/
 
-const GAP = 80;
-const LABEL_OFFSET = 40;
-const FONT = { family: "Inter", style: "Semi Bold" };
-
-// --- Validate selection ---
 if (selection.length === 0) {
-  figma.notify("Select something first.", { error: true });
-  return { error: "Nothing selected" };
+  figma.notify("Select something first", { error: true });
+  return "No selection";
 }
 
-// --- Gather variable collections ---
-const localCollections = await figma.variables.getLocalVariableCollectionsAsync();
+// Get collections
+var localCollections = await figma.variables.getLocalVariableCollectionsAsync();
 
-// Try to include team/library collections if the API is available
-let allCollections = [...localCollections];
-try {
-  if (figma.teamLibrary && figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync) {
-    const libCollections = await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync();
-    // Library collections have a different shape; we only need local ones
-    // that are already imported, so localCollections is usually sufficient.
-    console.log(`Found ${libCollections.length} library collection(s) for reference.`);
-  }
-} catch (e) {
-  console.log("Team library API not available; using local collections only.");
+// Resolve selected collection(s) from params
+var collectionXId = params.collectionX;
+var collectionYId = params.collectionY;
+var is2Axis = params.axes === "2 Axes" && collectionYId;
+
+var collectionX = null;
+for (var fi = 0; fi < localCollections.length; fi++) {
+  if (localCollections[fi].id === collectionXId) { collectionX = localCollections[fi]; break; }
+}
+if (!collectionX) collectionX = localCollections[0];
+if (!collectionX) {
+  figma.notify("No variable collections found", { error: true });
+  return "No collections";
 }
 
-if (allCollections.length === 0) {
-  figma.notify("No variable collections found in this file.", { error: true });
-  return { error: "No collections" };
-}
-
-// --- Pick the best collection (prefer one with 2+ modes) ---
-let collection = allCollections.find((c) => c.modes.length >= 2);
-if (!collection) {
-  collection = allCollections[0];
-  console.log(
-    `No collection with multiple modes found. Using "${collection.name}" (${collection.modes.length} mode).`
-  );
-}
-
-const modes = collection.modes; // Array of { modeId, name }
-console.log(`Using collection "${collection.name}" with ${modes.length} mode(s): ${modes.map((m) => m.name).join(", ")}`);
-
-// --- Load font for labels ---
-try {
-  await figma.loadFontAsync(FONT);
-} catch (e) {
-  console.log("Could not load Inter Semi Bold, falling back to Inter Regular.");
-  try {
-    await figma.loadFontAsync({ family: "Inter", style: "Regular" });
-  } catch (e2) {
-    console.log("Font loading failed; labels will be skipped.");
+var collectionY = null;
+if (is2Axis) {
+  for (var fi2 = 0; fi2 < localCollections.length; fi2++) {
+    if (localCollections[fi2].id === collectionYId) { collectionY = localCollections[fi2]; break; }
   }
 }
 
-// --- Calculate selection bounds ---
-function getBounds(nodes) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const node of nodes) {
-    const { x, y, width, height } = node.absoluteBoundingBox || {
-      x: node.x,
-      y: node.y,
-      width: node.width,
-      height: node.height,
-    };
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x + width);
-    maxY = Math.max(maxY, y + height);
+console.log("Collection X:", collectionX.name, "(" + collectionX.modes.length + " modes)");
+if (collectionY) console.log("Collection Y:", collectionY.name, "(" + collectionY.modes.length + " modes)");
+
+// Calculate selection bounds
+var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+for (var si = 0; si < selection.length; si++) {
+  var sn = selection[si];
+  if ("x" in sn) {
+    minX = Math.min(minX, sn.x);
+    minY = Math.min(minY, sn.y);
+    maxX = Math.max(maxX, sn.x + sn.width);
+    maxY = Math.max(maxY, sn.y + sn.height);
   }
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+var bounds = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+var gapX = bounds.width * 0.05;
+var gapY = bounds.height * 0.05;
+
+// Load font for labels
+await figma.loadFontAsync({ family: "Inter", style: "Semi Bold" });
+
+// Start below existing content
+var bottomY = 0;
+for (var ci = 0; ci < figma.currentPage.children.length; ci++) {
+  var cn = figma.currentPage.children[ci];
+  if ("y" in cn && "height" in cn) {
+    var cb = cn.y + cn.height;
+    if (cb > bottomY) bottomY = cb;
+  }
+}
+var labelHeight = 30;
+var startY = bottomY + gapY + labelHeight;
+var startX = bounds.x;
+var allNodes = [];
+
+function createLabel(text, x, y) {
+  var label = figma.createFrame();
+  label.layoutMode = "HORIZONTAL";
+  label.primaryAxisSizingMode = "AUTO";
+  label.counterAxisSizingMode = "AUTO";
+  label.paddingLeft = 8; label.paddingRight = 8;
+  label.paddingTop = 4; label.paddingBottom = 4;
+  label.cornerRadius = 4;
+  label.fills = [{ type: "SOLID", color: { r: 0.95, g: 0.95, b: 0.95 } }];
+  label.strokes = [{ type: "SOLID", color: { r: 0.85, g: 0.85, b: 0.85 } }];
+  label.strokeWeight = 1;
+  var t = figma.createText();
+  t.fontName = { family: "Inter", style: "Semi Bold" };
+  t.fontSize = 12;
+  t.characters = text;
+  t.fills = [{ type: "SOLID", color: { r: 0.2, g: 0.2, b: 0.2 } }];
+  label.appendChild(t);
+  label.x = x;
+  label.y = y;
+  return label;
 }
 
-const bounds = getBounds(selection);
-const startX = bounds.x;
-const startY = bounds.y + bounds.height + GAP * 2; // Place below existing content
+if (is2Axis && collectionY) {
+  // 2-AXIS MATRIX
+  var modesX = collectionX.modes;
+  var modesY = collectionY.modes;
 
-// --- Create matrix ---
-const matrixChildren = [];
-
-for (let i = 0; i < modes.length; i++) {
-  const mode = modes[i];
-  const offsetX = i * (bounds.width + GAP);
-
-  // Create a label
-  try {
-    const label = figma.createText();
-    label.fontName = FONT;
-    label.characters = mode.name;
-    label.fontSize = 24;
-    label.x = startX + offsetX;
-    label.y = startY - LABEL_OFFSET;
-    label.fills = [{ type: "SOLID", color: { r: 0.4, g: 0.4, b: 0.4 } }];
-    matrixChildren.push(label);
-  } catch (e) {
-    console.log(`Skipping label for mode "${mode.name}": ${e.message}`);
+  // Row labels (Y axis)
+  for (var yi = 0; yi < modesY.length; yi++) {
+    var rl = createLabel(modesY[yi].name, startX - 120, startY + (bounds.height + gapY) * yi + bounds.height / 2 - 12);
+    allNodes.push(rl);
   }
 
-  // Clone each selected node
-  for (const node of selection) {
-    try {
-      const clone = node.clone();
-      clone.x = startX + offsetX + (node.x - bounds.x);
-      clone.y = startY + (node.y - bounds.y);
+  // Column labels (X axis)
+  for (var xi = 0; xi < modesX.length; xi++) {
+    var cl = createLabel(modesX[xi].name, startX + (bounds.width + gapX) * xi, startY - labelHeight - 4);
+    allNodes.push(cl);
+  }
 
-      // Set the explicit variable mode on the clone
-      // This tells Figma to resolve variables using this mode
-      try {
-        clone.setExplicitVariableModeForCollection(collection, mode.modeId);
-      } catch (e) {
-        console.log(`Could not set mode "${mode.name}" on "${node.name}": ${e.message}`);
+  // Create grid
+  for (var gy = 0; gy < modesY.length; gy++) {
+    for (var gx = 0; gx < modesX.length; gx++) {
+      var clones = [];
+      for (var sci = 0; sci < selection.length; sci++) { clones.push(selection[sci].clone()); }
+      for (var cli = 0; cli < clones.length; cli++) {
+        var clone = clones[cli];
+        if ("x" in clone) {
+          clone.x += (startX + (bounds.width + gapX) * gx) - bounds.x;
+          clone.y += (startY + (bounds.height + gapY) * gy) - bounds.y;
+        }
+        if ("setExplicitVariableModeForCollection" in clone) {
+          try { clone.setExplicitVariableModeForCollection(collectionX.id, modesX[gx].modeId); } catch(e) {}
+          try { clone.setExplicitVariableModeForCollection(collectionY.id, modesY[gy].modeId); } catch(e) {}
+        }
       }
-
-      matrixChildren.push(clone);
-    } catch (e) {
-      console.log(`Could not clone "${node.name}": ${e.message}`);
+      for (var ai = 0; ai < clones.length; ai++) { allNodes.push(clones[ai]); }
     }
   }
+
+  var total = modesX.length * modesY.length;
+  var group = figma.group(allNodes, figma.currentPage);
+  group.name = collectionX.name + " x " + collectionY.name + " - Mode Matrix";
+  figma.currentPage.selection = [group];
+  figma.viewport.scrollAndZoomIntoView([group]);
+  figma.notify("Created " + modesX.length + "x" + modesY.length + " (" + total + ") grid");
+  return total + " permutations created";
+
+} else {
+  // 1-AXIS MATRIX
+  for (var i = 0; i < collectionX.modes.length; i++) {
+    var mode = collectionX.modes[i];
+    var x = startX + (bounds.width + gapX) * i;
+
+    var label = createLabel(mode.name, x, startY - labelHeight - 4);
+    allNodes.push(label);
+
+    var clones2 = [];
+    for (var sci2 = 0; sci2 < selection.length; sci2++) { clones2.push(selection[sci2].clone()); }
+    for (var j = 0; j < clones2.length; j++) {
+      var c2 = clones2[j];
+      if ("x" in c2) {
+        c2.x += x - bounds.x;
+        c2.y += startY - bounds.y;
+      }
+      if ("setExplicitVariableModeForCollection" in c2) {
+        try { c2.setExplicitVariableModeForCollection(collectionX.id, mode.modeId); } catch(e) {}
+      }
+    }
+    for (var ai2 = 0; ai2 < clones2.length; ai2++) { allNodes.push(clones2[ai2]); }
+    console.log("Created mode:", mode.name);
+  }
+
+  var group2 = figma.group(allNodes, figma.currentPage);
+  group2.name = collectionX.name + " - Mode Matrix";
+  figma.currentPage.selection = [group2];
+  figma.viewport.scrollAndZoomIntoView([group2]);
+  figma.notify("Created " + collectionX.modes.length + " permutations");
+  return collectionX.modes.length + " modes created";
 }
-
-if (matrixChildren.length === 0) {
-  figma.notify("Failed to create matrix clones.", { error: true });
-  return { error: "No clones created" };
-}
-
-// --- Group everything ---
-const group = figma.group(matrixChildren, currentPage);
-group.name = `Mode Matrix — ${collection.name}`;
-
-// --- Select and zoom ---
-currentPage.selection = [group];
-figma.viewport.scrollAndZoomIntoView([group]);
-
-const message = `Created mode matrix for "${collection.name}" with ${modes.length} mode(s).`;
-figma.notify(message);
-console.log(message);
-
-return {
-  collection: collection.name,
-  modes: modes.map((m) => m.name),
-  clonesCreated: matrixChildren.length,
-};

@@ -6,8 +6,13 @@
       "title": "Mode Matrix",
       "description": "Create a visual matrix showing selection in every mode of a collection",
       "category": "organization",
-      "version": "1.0.0",
-      "path": "mode-matrix.js"
+      "version": "2.0.0",
+      "path": "mode-matrix.js",
+      "params": [
+        { "key": "axes", "type": "select", "label": "Axes", "options": ["1 Axis", "2 Axes"], "default": "1 Axis" },
+        { "key": "collectionX", "type": "select", "label": "Collection (X Axis)", "source": "figma:collections" },
+        { "key": "collectionY", "type": "select", "label": "Collection (Y Axis)", "source": "figma:collections", "showWhen": { "axes": "2 Axes" } }
+      ]
     }
   ]
 }
