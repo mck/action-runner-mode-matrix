@@ -1,0 +1,13 @@
+{
+  "name": "Mode Matrix",
+  "actions": [
+    {
+      "id": "mode-matrix",
+      "title": "Mode Matrix",
+      "description": "Create a visual matrix showing selection in every mode of a collection",
+      "category": "organization",
+      "version": "1.0.0",
+      "path": "mode-matrix.js"
+    }
+  ]
+}
