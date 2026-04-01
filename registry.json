@@ -30,10 +30,11 @@
       "title": "Clean Node Token Data",
       "description": "Remove token assignments from all elements (selection, page, or document)",
       "category": "migration",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "path": "clean-node-token-data.js",
       "params": [
         { "key": "scope", "type": "select", "label": "Scope", "options": ["Selection", "Current Page", "Entire Document"], "default": "Current Page" },
+        { "key": "skipInstances", "type": "boolean", "label": "Skip component instances (recommended)", "default": true },
         { "key": "dryRun", "type": "boolean", "label": "Dry run (preview only)", "default": true }
       ]
     }

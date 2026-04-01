@@ -1,17 +1,19 @@
 // @action.title: Clean Node Token Data
 // @action.description: Remove token assignments from all elements (selection, page, or document)
 // @action.category: migration
-// @action.version: 1.0.0
+// @action.version: 1.1.0
 
 /* @action.params
 [
   { "key": "scope", "type": "select", "label": "Scope", "options": ["Selection", "Current Page", "Entire Document"], "default": "Current Page" },
+  { "key": "skipInstances", "type": "boolean", "label": "Skip component instances (recommended)", "default": true },
   { "key": "dryRun", "type": "boolean", "label": "Dry run (preview only)", "default": true }
 ]
 */
 
 var dryRun = params.dryRun !== false;
 var scope = params.scope || "Current Page";
+var skipInstances = params.skipInstances !== false;
 
 // Get target nodes
 var roots = [];
@@ -35,32 +37,62 @@ if (scope === "Selection") {
 var nodesChecked = 0;
 var nodesCleaned = 0;
 var keysRemoved = 0;
+var nodesSkipped = 0;
+
+function isInsideInstance(node) {
+  var current = node.parent;
+  while (current && current.type !== "PAGE" && current.type !== "DOCUMENT") {
+    if (current.type === "INSTANCE") return true;
+    current = current.parent;
+  }
+  return false;
+}
 
 function cleanNode(node) {
   nodesChecked++;
 
-  // Check for shared plugin data in "tokens" namespace
-  var keys = node.getSharedPluginDataKeys("tokens");
-  if (keys.length > 0) {
-    nodesCleaned++;
-    var nodePath = getNodePath(node);
-    for (var ki = 0; ki < keys.length; ki++) {
-      var key = keys[ki];
-      var value = node.getSharedPluginData("tokens", key);
-      var preview = value.length > 60 ? value.substring(0, 60) + "..." : value;
-      console.log(nodePath + " [" + key + "] = " + preview);
-      if (!dryRun) {
-        node.setSharedPluginData("tokens", key, "");
-      }
-      keysRemoved++;
-    }
+  // Skip children of instances — they don't own their token data,
+  // it's inherited from the main component and reappears on next read
+  if (skipInstances && node.type === "INSTANCE") {
+    nodesSkipped++;
+    // Still clean the instance node itself, just don't recurse into its children
+    cleanOwnData(node);
+    return;
   }
+
+  // Skip nodes that are inside an instance (not the instance itself)
+  if (skipInstances && isInsideInstance(node)) {
+    nodesSkipped++;
+    return;
+  }
+
+  cleanOwnData(node);
 
   // Recurse into children
   if ("children" in node) {
     for (var ci = 0; ci < node.children.length; ci++) {
       cleanNode(node.children[ci]);
     }
+  }
+}
+
+function cleanOwnData(node) {
+  var keys = node.getSharedPluginDataKeys("tokens");
+  if (keys.length === 0) return;
+
+  nodesCleaned++;
+  var nodePath = getNodePath(node);
+  var nodeType = node.type === "INSTANCE" ? " (instance)" : "";
+
+  for (var ki = 0; ki < keys.length; ki++) {
+    var key = keys[ki];
+    var value = node.getSharedPluginData("tokens", key);
+    var preview = value.length > 60 ? value.substring(0, 60) + "..." : value;
+    console.log(nodePath + nodeType + " [" + key + "] = " + preview);
+    if (!dryRun) {
+      node.setSharedPluginData("tokens", key, "");
+    }
+    keysRemoved++;
   }
 }
 
@@ -83,10 +115,13 @@ console.log("---");
 console.log("Scope:", scope);
 console.log("Nodes checked:", nodesChecked);
 console.log("Nodes with token data:", nodesCleaned);
+console.log("Nodes skipped (inside instances):", nodesSkipped);
 console.log("Token keys " + (dryRun ? "found" : "removed") + ":", keysRemoved);
 
 if (dryRun) {
-  figma.notify("Dry run: " + keysRemoved + " token keys on " + nodesCleaned + " nodes. Uncheck 'Dry run' to remove.");
+  var msg = "Dry run: " + keysRemoved + " token keys on " + nodesCleaned + " nodes";
+  if (nodesSkipped > 0) msg += " (" + nodesSkipped + " instance children skipped)";
+  figma.notify(msg);
 } else {
   figma.notify("Removed " + keysRemoved + " token keys from " + nodesCleaned + " nodes");
 }
@@ -96,5 +131,6 @@ return {
   scope: scope,
   nodesChecked: nodesChecked,
   nodesCleaned: nodesCleaned,
+  nodesSkipped: nodesSkipped,
   keysRemoved: keysRemoved
 };
