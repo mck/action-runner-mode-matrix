@@ -1,5 +1,5 @@
 {
-  "name": "Mode Matrix",
+  "name": "Studio Actions",
   "actions": [
     {
       "id": "mode-matrix",
@@ -12,6 +12,29 @@
         { "key": "axes", "type": "select", "label": "Axes", "options": ["1 Axis", "2 Axes"], "default": "1 Axis" },
         { "key": "collectionX", "type": "select", "label": "Collection (X Axis)", "source": "figma:collections" },
         { "key": "collectionY", "type": "select", "label": "Collection (Y Axis)", "source": "figma:collections", "showWhen": { "axes": "2 Axes" } }
+      ]
+    },
+    {
+      "id": "clean-file-token-data",
+      "title": "Clean File Token Data",
+      "description": "Remove all Tokens Studio plugin data from the file root",
+      "category": "migration",
+      "version": "1.0.0",
+      "path": "clean-file-token-data.js",
+      "params": [
+        { "key": "dryRun", "type": "boolean", "label": "Dry run (preview only)", "default": true }
+      ]
+    },
+    {
+      "id": "clean-node-token-data",
+      "title": "Clean Node Token Data",
+      "description": "Remove token assignments from all elements (selection, page, or document)",
+      "category": "migration",
+      "version": "1.0.0",
+      "path": "clean-node-token-data.js",
+      "params": [
+        { "key": "scope", "type": "select", "label": "Scope", "options": ["Selection", "Current Page", "Entire Document"], "default": "Current Page" },
+        { "key": "dryRun", "type": "boolean", "label": "Dry run (preview only)", "default": true }
       ]
     }
   ]
