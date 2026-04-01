@@ -51,12 +51,10 @@ function isInsideInstance(node) {
 function cleanNode(node) {
   nodesChecked++;
 
-  // Skip children of instances — they don't own their token data,
-  // it's inherited from the main component and reappears on next read
+  // Skip instances entirely — their shared plugin data is inherited from
+  // the main component and reappears on next read. Cleaning them does nothing.
   if (skipInstances && node.type === "INSTANCE") {
     nodesSkipped++;
-    // Still clean the instance node itself, just don't recurse into its children
-    cleanOwnData(node);
     return;
   }
 
